@@ -1,0 +1,112 @@
+
+# URL: https://devopscube.com/setup-and-configure-sonarqube-on-linux/
+
+- name: "Install & Configure Sonarqube"
+  hosts: sonarqube
+  become: yes
+  gather_facts: true
+  vars:
+    REQ_PACKAGES:
+    - wget
+    - unzip
+
+    JAVA_JDK: java-11-openjdk
+
+    PSQL_PACKAGES:
+    - https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-42.0-32.noarch.rpm
+    - postgresql11-server
+    - postgresql11-contrib
+
+    SONAR_URL: https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-7.6.zip
+    SONAR_NAME: sonarqube-7.6
+    SONAR_USERNAME: sonar
+    ANSIBLE_USERNAME: ansible
+
+  tasks:
+
+  - name: "Intalling Required Packages"
+    ansible.builtin.package:
+      name: "{{ item }}"
+      state: present
+    loop: "{{ REQ_PACKAGES }}"
+
+    tags:
+      - skip
+
+  - name: "Install JDK"
+    ansible.builtin.package:
+      name: "{{ JAVA_JDK }}"
+      state: installed
+
+  # Install & Set up PostgreSQL 11 for SonarQube
+  - name: "Installing & Setting up PostgreSQL 11 for SonarQube"
+    ansible.builtin.package:
+      name: "{{ item }}"
+      state: present
+    loop: "{{ PSQL_PACKAGES }}"
+
+  - name: "Initialize the database"
+    ansible.builtin.shell:
+      cmd: /usr/pgsql-11/bin/postgresql-11-setup initdb
+
+  - name: "Changing PSQL Authentication method"
+    ansible.builtin.shell:
+      cmd: sed -i -e 's/peer$/trust/g' -e 's/ident$/md5/g' /var/lib/pgsql/11/data/pg_hba.conf
+
+  - name: "Start and enable PostgreSQL"
+    ansible.builtin.service:
+      name: postgresql-11
+      state: started
+      enabled: true
+
+  # Configure Database for Sonar
+  - name: "Configuring Database for Sonar"
+    ansible.builtin.script:
+      cmd: /vagrant/scripts/configure-sonar-database.sh
+
+  # Setup Sonarqube Web Server
+  - name: "Downloading the Sonarqube Installation file"
+    ansible.builtin.unarchive:
+      src: "{{ SONAR_URL }}"
+      dest: /opt
+      remote_src: true
+
+  - name: "Renaming the Sonar directory"
+    ansible.builtin.shell:
+      chdir: /opt
+      cmd: mv {{ SONAR_NAME }} sonarqube
+
+  - name: "Editing 'sonar.properties' file"
+    ansible.builtin.script:
+      cmd: /vagrant/scripts/sonar-config.sh
+
+  # Add Sonar User and Privileges
+  - name: "Add Sonar User and Privileges"
+    ansible.builtin.user:
+      name: "{{ SONAR_USERNAME }}"
+
+  - name: "Setting Permission of maven directory"
+    ansible.builtin.file:
+      path: /opt/sonarqube
+      state: directory
+      recurse: yes
+      owner: "{{ SONAR_USERNAME }}"
+      group: "{{ SONAR_USERNAME }}"
+
+  # Start Sonarqube Service
+  - name: "Start Sonarqube Service"
+    ansible.builtin.shell:
+      chdir: /opt/sonarqube/bin/linux-x86-64/
+      cmd: sh sonar.sh start
+
+  # Setting up Sonarqube as systemd service
+  - name: "Placing Sonarqube systemd service file"
+    ansible.builtin.copy:
+      src: /vagrant/config/sonarqube.service
+      dest: /etc/systemd/system/sonarqube.service
+
+  - name: "Start & Enable Sonarqube"
+    ansible.builtin.service:
+      name: sonarqube
+      state: started
+      enabled: true

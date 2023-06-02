@@ -1,0 +1,50 @@
+
+- name: "Install & Configure Maven"
+  hosts: sonarqube
+  become: yes
+  gather_facts: yes
+  vars:
+    REQ_PACKAGES:
+      - unzip
+    JAVA_JDK: java-11-openjdk
+    MAVEN_REPO_URL: https://dlcdn.apache.org/maven/maven-3/3.9.0/binaries/apache-maven-3.9.0-bin.zip
+    MAVEN_FILE_NAME: apache-maven-3.9.0
+    M2_HOME: /opt/maven
+
+  tasks:
+
+  - name: "Install Required Packages"
+    ansible.builtin.package:
+      name: "{{ item }}"
+      state: present
+    loop: "{{ REQ_PACKAGES }}"
+
+  - name: "Install JDK"
+    ansible.builtin.package:
+      name: "{{ JAVA_JDK }}"
+      state: installed
+
+  - name: "Download Maven from Repo"
+    ansible.builtin.unarchive:
+      src: "{{ MAVEN_REPO_URL }}"
+      dest: /opt
+      remote_src: true
+
+  - name: "Create a symbolic link to the maven folder"
+    ansible.builtin.file:
+      src: /opt/{{ MAVEN_FILE_NAME }}
+      dest: "{{ M2_HOME }}"
+      owner: ansible
+      group: root
+      state: link
+
+  - name: "Add Maven to System PATH"
+    ansible.builtin.copy:
+      content: export M2_HOME=/opt/maven; export PATH=${M2_HOME}/bin:${PATH}
+      dest: /etc/profile.d/maven.sh
+      owner: ansible
+      group: root
+      mode: 0755
+    
+  - name: "Sourcing Maven Profile"
+    ansible.builtin.shell: export M2_HOME=/opt/maven; export PATH=${M2_HOME}/bin:${PATH}; source /etc/profile.d/maven.sh
